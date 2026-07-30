@@ -43,6 +43,15 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
+
+useEffect(() => {
+  const saved = localStorage.getItem("orbital-chat:session");
+  if (saved) {
+    const { phone, displayName } = JSON.parse(saved);
+    login(phone, displayName);
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
   const [onlineUsers, setOnlineUsers] = useState<PublicUser[]>([]);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
