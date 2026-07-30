@@ -223,7 +223,7 @@ useEffect(() => {
     socket.emit("typing:update", { roomId, isTyping });
   }, []);
 
-  const logout = useCallback(() => {
+ const logout = useCallback(() => {
     socket.disconnect();
     setCurrentUser(null);
     setOnlineUsers([]);
@@ -232,6 +232,7 @@ useEffect(() => {
     setMessagesByRoom({});
     setUnreadRoomIds(new Set());
     setTypingByRoom({});
+    localStorage.removeItem("orbital-chat:session");
   }, []);
 
   const value = useMemo<ChatContextValue>(
