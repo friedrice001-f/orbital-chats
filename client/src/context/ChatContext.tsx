@@ -124,7 +124,7 @@ useEffect(() => {
   const onlineUsersRef = useRef<PublicUser[]>([]);
   onlineUsersRef.current = onlineUsers;
 
-  const login = useCallback(async (phone: string, displayName: string) => {
+ const login = useCallback(async (phone: string, displayName: string) => {
     setIsConnecting(true);
     return new Promise<LoginResult>((resolve) => {
       if (!socket.connected) socket.connect();
@@ -136,6 +136,7 @@ useEffect(() => {
             setCurrentUser(result.user);
             setRooms(result.rooms || []);
             setOnlineUsers(result.onlineUsers || []);
+            localStorage.setItem("orbital-chat:session", JSON.stringify({ phone, displayName }));
           }
           resolve(result);
         });
@@ -149,12 +150,14 @@ useEffect(() => {
             setCurrentUser(result.user);
             setRooms(result.rooms || []);
             setOnlineUsers(result.onlineUsers || []);
+            localStorage.setItem("orbital-chat:session", JSON.stringify({ phone, displayName }));
           }
           resolve(result);
         });
       }
     });
   }, []);
+
 
   const openDm = useCallback(async (peerId: string) => {
     return new Promise<void>((resolve) => {
