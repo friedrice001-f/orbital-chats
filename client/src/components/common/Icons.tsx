@@ -102,3 +102,29 @@ export const CheckIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M20 6 9 17l-5-5" />
   </svg>
 );
+export const PhoneIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92Z" />
+  </svg>
+);
+
+export const PhoneOffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91" />
+    <path d="M2 2l20 20" />
+  </svg>
+);
+
+export const MicIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="9" y="2" width="6" height="12" rx="3" />
+    <path d="M5 10a7 7 0 0 0 14 0M12 19v3" />
+  </svg>
+);
+
+export const MicOffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.94-.6" />
+    <path d="M17 16.95A7 7 0 0 1 5 12v-2M12 19v3M2 2l20 20" />
+  </svg>
+);
