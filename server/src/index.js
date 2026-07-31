@@ -9,22 +9,32 @@ import * as store from "./store.js";
 const PORT = process.env.PORT || 4000;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
-// Basic phone number sanity check — this is identity-only, NOT real
-// SMS/OTP verification. Wiring up real verification requires a paid
-// provider (e.g. Twilio Verify) and is out of scope for this demo.
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 
 const app = express();
 app.use(cors({ origin: CLIENT_ORIGIN }));
-app.use(express.json({ limit: "8mb" })); // headroom for base64 image payloads
+app.use(express.json({ limit: "8mb" }));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: CLIENT_ORIGIN, methods: ["GET", "POST"] },
-  maxHttpBufferSize: 8 * 1024 * 1024, // allow image payloads over the socket
+  maxHttpBufferSize: 8 * 1024 * 1024,
 });
+
+// userId -> peerUserId, tracks who's currently on a call so we can reject
+// new invites as "busy" and clean up properly on disconnect.
+const activeCallPeer = new Map();
+
+function endCallFor(userId) {
+  const peerId = activeCallPeer.get(userId);
+  if (peerId) {
+    activeCallPeer.delete(userId);
+    activeCallPeer.delete(peerId);
+  }
+  return peerId;
+}
 
 function broadcastPresence() {
   const online = store.listOnlineUsers().map(store.publicUser);
@@ -64,9 +74,8 @@ io.on("connection", (socket) => {
       socketId: socket.id,
     });
     currentUser = user;
-    socket.join(user.id); // personal channel for cross-device / re-login delivery
+    socket.join(user.id);
 
-    // Join every room this user already belongs to
     for (const room of store.roomsForUser(user.id)) {
       socket.join(room.id);
     }
@@ -91,15 +100,12 @@ io.on("connection", (socket) => {
 
     const room = store.getOrCreateDmRoom(currentUser.id, peerId);
     socket.join(room.id);
-    // Also add the peer's active socket to the room so they receive events
-    // immediately (their own client will also join on their session).
     const peerSocket = io.sockets.sockets.get(peer.socketId);
     peerSocket?.join(room.id);
 
     const history = store.getMessages(room.id);
     callback?.({ ok: true, room: roomView(room, currentUser.id), history });
 
-    // Let the peer know a DM room now exists with them, in case it's new.
     peerSocket?.emit("room:created", roomView(room, peer.id));
   });
 
@@ -137,7 +143,6 @@ io.on("connection", (socket) => {
     if (!text && !image) {
       return callback?.({ ok: false, error: "Empty message." });
     }
-    // Guard against oversized inline image payloads (demo-scale only).
     if (image?.dataUrl && image.dataUrl.length > 6_000_000) {
       return callback?.({ ok: false, error: "Image is too large." });
     }
@@ -162,9 +167,69 @@ io.on("connection", (socket) => {
     });
   });
 
+  /* ---------------------------- CALLS ------------------------------ */
+  socket.on("call:invite", ({ toUserId, offer }, callback) => {
+    if (!currentUser) return callback?.({ ok: false, error: "Not authenticated." });
+    const target = store.getUserById(toUserId);
+    if (!target || !target.online) {
+      return callback?.({ ok: false, error: "User is offline." });
+    }
+    if (activeCallPeer.has(toUserId) || activeCallPeer.has(currentUser.id)) {
+      return callback?.({ ok: false, error: "User is busy." });
+    }
+    const targetSocket = io.sockets.sockets.get(target.socketId);
+    if (!targetSocket) {
+      return callback?.({ ok: false, error: "User is offline." });
+    }
+    activeCallPeer.set(currentUser.id, toUserId);
+    activeCallPeer.set(toUserId, currentUser.id);
+    targetSocket.emit("call:incoming", {
+      fromUserId: currentUser.id,
+      fromName: currentUser.displayName,
+      offer,
+    });
+    callback?.({ ok: true });
+  });
+
+  socket.on("call:accept", ({ toUserId, answer }) => {
+    if (!currentUser) return;
+    const target = store.getUserById(toUserId);
+    const targetSocket = target && io.sockets.sockets.get(target.socketId);
+    targetSocket?.emit("call:accepted", { fromUserId: currentUser.id, answer });
+  });
+
+  socket.on("call:reject", ({ toUserId }) => {
+    if (!currentUser) return;
+    endCallFor(currentUser.id);
+    const target = store.getUserById(toUserId);
+    const targetSocket = target && io.sockets.sockets.get(target.socketId);
+    targetSocket?.emit("call:rejected", { fromUserId: currentUser.id });
+  });
+
+  socket.on("call:end", ({ toUserId }) => {
+    if (!currentUser) return;
+    endCallFor(currentUser.id);
+    const target = store.getUserById(toUserId);
+    const targetSocket = target && io.sockets.sockets.get(target.socketId);
+    targetSocket?.emit("call:ended", { fromUserId: currentUser.id });
+  });
+
+  socket.on("call:ice-candidate", ({ toUserId, candidate }) => {
+    if (!currentUser) return;
+    const target = store.getUserById(toUserId);
+    const targetSocket = target && io.sockets.sockets.get(target.socketId);
+    targetSocket?.emit("call:ice-candidate", { fromUserId: currentUser.id, candidate });
+  });
+
   /* -------------------------- DISCONNECT --------------------------- */
   socket.on("disconnect", () => {
     if (!currentUser) return;
+    const peerId = endCallFor(currentUser.id);
+    if (peerId) {
+      const peer = store.getUserById(peerId);
+      const peerSocket = peer && io.sockets.sockets.get(peer.socketId);
+      peerSocket?.emit("call:ended", { fromUserId: currentUser.id });
+    }
     store.setUserOffline(socket.id);
     broadcastPresence();
   });
