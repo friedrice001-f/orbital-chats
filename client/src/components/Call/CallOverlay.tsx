@@ -20,6 +20,12 @@ function formatDuration(totalSeconds: number) {
   const s = (totalSeconds % 60).toString().padStart(2, "0");
   return `${m}:${s}`;
 }
+//error yellow code
+{errorMessage && <p className="text-sm text-red-400 mt-2">{errorMessage}</p>}
+{debugInfo && (
+  <p className="text-[10px] text-yellow-300 mt-2 break-all px-4">{debugInfo}</p>
+)}
+// end of the code
 
 export function CallOverlay() {
   const {
@@ -59,15 +65,16 @@ export function CallOverlay() {
   const isVideo = kind === "video";
   const isActive = status === "active";
 
-  // TEMPORARY DEBUG — remove after checking on the Samsung phone
-  useEffect(() => {
-    if (status === "active") {
-      alert(
-        `setSinkId: ${typeof HTMLMediaElement.prototype.setSinkId}\nUA: ${navigator.userAgent}`
-      );
-    }
-  }, [status]);
-  // END TEMPORARY DEBUG
+ // TEMPORARY DEBUG — remove after checking
+const [debugInfo, setDebugInfo] = useState("");
+useEffect(() => {
+  if (status === "active" && !debugInfo) {
+    setDebugInfo(
+      `setSinkId: ${typeof HTMLMediaElement.prototype.setSinkId} | UA: ${navigator.userAgent}`
+    );
+  }
+}, [status, debugInfo]);
+// END TEMPORARY DEBUG
 
   // Register whichever remote media element is currently mounted (video
   // for video calls, audio for voice calls) so toggleSpeaker can call
