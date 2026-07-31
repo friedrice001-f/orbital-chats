@@ -115,12 +115,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const currentUserIdRef = useRef<string | null>(null);
+ const currentUserIdRef = useRef<string | null>(null);
   currentUserIdRef.current = currentUser?.id || null;
   const onlineUsersRef = useRef<PublicUser[]>([]);
   onlineUsersRef.current = onlineUsers;
-
+  const credentialsRef = useRef<{ phone: string; displayName: string } | null>(null);
+  useEffect(() => {
+    function handleConnect() {
+      // Only re-identify if we were already logged in before this — the
+      // very first login is handled by login() itself.
+      if (currentUserIdRef.current && credentialsRef.current) {
+        socket.emit("auth:login", credentialsRef.current, (result: LoginResult) => {
+          if (result.ok && result.user) {
+            setCurrentUser(result.user);
+            setRooms(result.rooms || []);
+            setOnlineUsers(result.onlineUsers || []);
+          }
+        });
+      }
+    }
+    socket.on("connect", handleConnect);
+    return () => socket.off("connect", handleConnect);
+  }, []);
+  
   const login = useCallback(async (phone: string, displayName: string) => {
+    credentialsRef.current = { phone, displayName };
     setIsConnecting(true);
     return new Promise<LoginResult>((resolve) => {
       if (!socket.connected) socket.connect();
