@@ -56,15 +56,17 @@ export interface SendMessageResult {
   error?: string;
   message?: ChatMessage;
 }
-
 export interface TypingEvent {
-  roomId: string;
-  userId: string;
-  isTyping: boolean;
+    roomId: string;
+    userId: string;
+    isTyping: boolean;
+  }
+
   export type CallStatus = "idle" | "calling" | "ringing" | "connected";
 
-export interface IncomingCallInfo {
-  fromUserId: string;
-  fromName: string;
-}
+  export interface IncomingCallInfo {
+    fromUserId: string;
+    fromName: string;
+  }
+
 }
