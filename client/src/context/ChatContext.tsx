@@ -3,255 +3,274 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { socket } from "../lib/socket";
-import { useChat } from "./ChatContext";
-import type { CallStatus } from "../types";
+import type {
+  ChatMessage,
+  CreateGroupResult,
+  ImagePayload,
+  LoginResult,
+  OpenDmResult,
+  PublicUser,
+  RoomSummary,
+  SendMessageResult,
+  TypingEvent,
+} from "../types";
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: "stun:stun.l.google.com:19302" },
-  { urls: "stun:stun1.l.google.com:19302" },
-];
-
-interface CallContextValue {
-  status: CallStatus;
-  peerName: string | null;
-  isMuted: boolean;
-  callDurationSec: number;
-  startCall: (peerId: string, peerName: string) => Promise<void>;
-  acceptCall: () => Promise<void>;
-  rejectCall: () => void;
-  endCall: () => void;
-  toggleMute: () => void;
-  incomingCall: { fromUserId: string; fromName: string } | null;
+interface ChatContextValue {
+  currentUser: PublicUser | null;
+  onlineUsers: PublicUser[];
+  rooms: RoomSummary[];
+  activeRoomId: string | null;
+  messagesByRoom: Record<string, ChatMessage[]>;
+  unreadRoomIds: Set<string>;
+  typingByRoom: Record<string, string[]>;
+  isConnecting: boolean;
+  login: (phone: string, displayName: string) => Promise<LoginResult>;
+  openDm: (peerId: string) => Promise<void>;
+  createGroup: (name: string, memberIds: string[]) => Promise<void>;
+  selectRoom: (roomId: string) => void;
+  sendMessage: (roomId: string, text: string, image?: ImagePayload | null) => Promise<void>;
+  setTyping: (roomId: string, isTyping: boolean) => void;
+  logout: () => void;
 }
 
-const CallContext = createContext<CallContextValue | null>(null);
+const ChatContext = createContext<ChatContextValue | null>(null);
 
-export function CallProvider({ children }: { children: ReactNode }) {
-  const { currentUser } = useChat();
-  const [status, setStatus] = useState<CallStatus>("idle");
-  const [peerName, setPeerName] = useState<string | null>(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [callDurationSec, setCallDurationSec] = useState(0);
-  const [incomingCall, setIncomingCall] = useState<{
-    fromUserId: string;
-    fromName: string;
-  } | null>(null);
-
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
-  const peerIdRef = useRef<string | null>(null);
-  const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
-  const durationTimerRef = useRef<number | null>(null);
-  const statusRef = useRef<CallStatus>("idle");
-  statusRef.current = status;
-
-  const cleanup = useCallback(() => {
-    pcRef.current?.close();
-    pcRef.current = null;
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
-    localStreamRef.current = null;
-    peerIdRef.current = null;
-    pendingOfferRef.current = null;
-    setStatus("idle");
-    setPeerName(null);
-    setIsMuted(false);
-    setIncomingCall(null);
-    setCallDurationSec(0);
-    if (durationTimerRef.current) {
-      window.clearInterval(durationTimerRef.current);
-      durationTimerRef.current = null;
-    }
-    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
-  }, []);
-
-  const createPeerConnection = useCallback((toUserId: string) => {
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        socket.emit("call:ice-candidate", { toUserId, candidate: e.candidate });
-      }
-    };
-
-    pc.ontrack = (e) => {
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = e.streams[0];
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") {
-        setStatus("connected");
-        if (!durationTimerRef.current) {
-          durationTimerRef.current = window.setInterval(() => {
-            setCallDurationSec((s) => s + 1);
-          }, 1000);
-        }
-      }
-    };
-
-    return pc;
-  }, []);
-
-  const startCall = useCallback(
-    async (peerId: string, name: string) => {
-      if (!currentUser || statusRef.current !== "idle") return;
-      setStatus("calling");
-      setPeerName(name);
-      peerIdRef.current = peerId;
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStreamRef.current = stream;
-
-      const pc = createPeerConnection(peerId);
-      pcRef.current = pc;
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      socket.emit(
-        "call:invite",
-        { toUserId: peerId, offer },
-        (res: { ok: boolean; error?: string }) => {
-          if (!res.ok) {
-            alert(res.error || "Call failed.");
-            cleanup();
-          }
-        }
-      );
-    },
-    [currentUser, createPeerConnection, cleanup]
-  );
-
-  const acceptCall = useCallback(async () => {
-    if (!incomingCall || !pendingOfferRef.current) return;
-    const { fromUserId, fromName } = incomingCall;
-    setPeerName(fromName);
-    peerIdRef.current = fromUserId;
-    setIncomingCall(null);
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    localStreamRef.current = stream;
-
-    const pc = createPeerConnection(fromUserId);
-    pcRef.current = pc;
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-
-    await pc.setRemoteDescription(new RTCSessionDescription(pendingOfferRef.current));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    socket.emit("call:accept", { toUserId: fromUserId, answer });
-    pendingOfferRef.current = null;
-  }, [incomingCall, createPeerConnection]);
-
-  const rejectCall = useCallback(() => {
-    if (!incomingCall) return;
-    socket.emit("call:reject", { toUserId: incomingCall.fromUserId });
-    setIncomingCall(null);
-    pendingOfferRef.current = null;
-    setStatus("idle");
-  }, [incomingCall]);
-
-  const endCall = useCallback(() => {
-    if (peerIdRef.current) {
-      socket.emit("call:end", { toUserId: peerIdRef.current });
-    }
-    cleanup();
-  }, [cleanup]);
-
-  const toggleMute = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const nextMuted = !isMuted;
-    stream.getAudioTracks().forEach((t) => (t.enabled = !nextMuted));
-    setIsMuted(nextMuted);
-  }, [isMuted]);
+export function ChatProvider({ children }: { children: ReactNode }) {
+  const [currentUser, setCurrentUser] = useState<PublicUser | null>(null);
+  const [onlineUsers, setOnlineUsers] = useState<PublicUser[]>([]);
+  const [rooms, setRooms] = useState<RoomSummary[]>([]);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [messagesByRoom, setMessagesByRoom] = useState<Record<string, ChatMessage[]>>({});
+  const [unreadRoomIds, setUnreadRoomIds] = useState<Set<string>>(new Set());
+  const [typingByRoom, setTypingByRoom] = useState<Record<string, string[]>>({});
+  const [isConnecting, setIsConnecting] = useState(false);
 
   useEffect(() => {
-    function handleIncoming({
-      fromUserId,
-      fromName,
-      offer,
-    }: {
-      fromUserId: string;
-      fromName: string;
-      offer: RTCSessionDescriptionInit;
-    }) {
-      if (statusRef.current !== "idle") return;
-      pendingOfferRef.current = offer;
-      setIncomingCall({ fromUserId, fromName });
-      setStatus("ringing");
+    const saved = localStorage.getItem("orbital-chat:session");
+    if (saved) {
+      const { phone, displayName } = JSON.parse(saved);
+      login(phone, displayName);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const activeRoomIdRef = useRef<string | null>(null);
+  activeRoomIdRef.current = activeRoomId;
+
+  useEffect(() => {
+    function handlePresence(users: PublicUser[]) {
+      setOnlineUsers(users);
     }
 
-    async function handleAccepted({ answer }: { answer: RTCSessionDescriptionInit }) {
-      if (!pcRef.current) return;
-      await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-      setStatus("connected");
-    }
+    function handleNewMessage(message: ChatMessage) {
+      setMessagesByRoom((prev) => {
+        const list = prev[message.roomId] || [];
+        return { ...prev, [message.roomId]: [...list, message] };
+      });
 
-    function handleRejected() {
-      cleanup();
-    }
-
-    function handleEnded() {
-      cleanup();
-    }
-
-    async function handleIceCandidate({ candidate }: { candidate: RTCIceCandidateInit }) {
-      if (!pcRef.current) return;
-      try {
-        await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-      } catch {
-        // Safe to ignore stray candidates arriving out of order.
+      if (
+        message.roomId !== activeRoomIdRef.current &&
+        message.senderId !== currentUserIdRef.current
+      ) {
+        setUnreadRoomIds((prev) => new Set(prev).add(message.roomId));
       }
     }
 
-    socket.on("call:incoming", handleIncoming);
-    socket.on("call:accepted", handleAccepted);
-    socket.on("call:rejected", handleRejected);
-    socket.on("call:ended", handleEnded);
-    socket.on("call:ice-candidate", handleIceCandidate);
+    function handleRoomCreated(room: RoomSummary) {
+      setRooms((prev) => {
+        if (prev.some((r) => r.id === room.id)) return prev;
+        return [...prev, room];
+      });
+      setMessagesByRoom((prev) => ({ ...prev, [room.id]: prev[room.id] || [] }));
+    }
+
+    function handleTyping({ roomId, userId, isTyping }: TypingEvent) {
+      const user = onlineUsersRef.current.find((u) => u.id === userId);
+      const name = user?.displayName || "Someone";
+      setTypingByRoom((prev) => {
+        const current = new Set(prev[roomId] || []);
+        if (isTyping) current.add(name);
+        else current.delete(name);
+        return { ...prev, [roomId]: [...current] };
+      });
+    }
+
+    socket.on("presence:update", handlePresence);
+    socket.on("message:new", handleNewMessage);
+    socket.on("room:created", handleRoomCreated);
+    socket.on("typing:update", handleTyping);
 
     return () => {
-      socket.off("call:incoming", handleIncoming);
-      socket.off("call:accepted", handleAccepted);
-      socket.off("call:rejected", handleRejected);
-      socket.off("call:ended", handleEnded);
-      socket.off("call:ice-candidate", handleIceCandidate);
+      socket.off("presence:update", handlePresence);
+      socket.off("message:new", handleNewMessage);
+      socket.off("room:created", handleRoomCreated);
+      socket.off("typing:update", handleTyping);
     };
-  }, [cleanup]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  return (
-    <CallContext.Provider
-      value={{
-        status,
-        peerName,
-        isMuted,
-        callDurationSec,
-        startCall,
-        acceptCall,
-        rejectCall,
-        endCall,
-        toggleMute,
-        incomingCall,
-      }}
-    >
-      {children}
-      <audio ref={remoteAudioRef} autoPlay />
-    </CallContext.Provider>
+  const currentUserIdRef = useRef<string | null>(null);
+  currentUserIdRef.current = currentUser?.id || null;
+  const onlineUsersRef = useRef<PublicUser[]>([]);
+  onlineUsersRef.current = onlineUsers;
+
+  const login = useCallback(async (phone: string, displayName: string) => {
+    setIsConnecting(true);
+    return new Promise<LoginResult>((resolve) => {
+      if (!socket.connected) socket.connect();
+
+      socket.once("connect", () => {
+        socket.emit("auth:login", { phone, displayName }, (result: LoginResult) => {
+          setIsConnecting(false);
+          if (result.ok && result.user) {
+            setCurrentUser(result.user);
+            setRooms(result.rooms || []);
+            setOnlineUsers(result.onlineUsers || []);
+            localStorage.setItem("orbital-chat:session", JSON.stringify({ phone, displayName }));
+          }
+          resolve(result);
+        });
+      });
+
+      if (socket.connected) {
+        socket.emit("auth:login", { phone, displayName }, (result: LoginResult) => {
+          setIsConnecting(false);
+          if (result.ok && result.user) {
+            setCurrentUser(result.user);
+            setRooms(result.rooms || []);
+            setOnlineUsers(result.onlineUsers || []);
+            localStorage.setItem("orbital-chat:session", JSON.stringify({ phone, displayName }));
+          }
+          resolve(result);
+        });
+      }
+    });
+  }, []);
+
+  const openDm = useCallback(async (peerId: string) => {
+    return new Promise<void>((resolve) => {
+      socket.emit("room:openDm", { peerId }, (result: OpenDmResult) => {
+        if (result.ok && result.room) {
+          setRooms((prev) => {
+            if (prev.some((r) => r.id === result.room!.id)) return prev;
+            return [...prev, result.room!];
+          });
+          setMessagesByRoom((prev) => ({
+            ...prev,
+            [result.room!.id]: result.history || [],
+          }));
+          setActiveRoomId(result.room.id);
+          setUnreadRoomIds((prev) => {
+            const next = new Set(prev);
+            next.delete(result.room!.id);
+            return next;
+          });
+        }
+        resolve();
+      });
+    });
+  }, []);
+
+  const createGroup = useCallback(async (name: string, memberIds: string[]) => {
+    return new Promise<void>((resolve) => {
+      socket.emit("room:createGroup", { name, memberIds }, (result: CreateGroupResult) => {
+        if (result.ok && result.room) {
+          setRooms((prev) => [...prev, result.room!]);
+          setMessagesByRoom((prev) => ({ ...prev, [result.room!.id]: result.history || [] }));
+          setActiveRoomId(result.room.id);
+        }
+        resolve();
+      });
+    });
+  }, []);
+
+  const selectRoom = useCallback((roomId: string) => {
+    setActiveRoomId(roomId);
+    setUnreadRoomIds((prev) => {
+      if (!prev.has(roomId)) return prev;
+      const next = new Set(prev);
+      next.delete(roomId);
+      return next;
+    });
+  }, []);
+
+  const sendMessage = useCallback(
+    async (roomId: string, text: string, image?: ImagePayload | null) => {
+      return new Promise<void>((resolve) => {
+        socket.emit(
+          "message:send",
+          { roomId, text: text || null, image: image || null },
+          (_result: SendMessageResult) => resolve()
+        );
+      });
+    },
+    []
   );
+
+  const setTyping = useCallback((roomId: string, isTyping: boolean) => {
+    socket.emit("typing:update", { roomId, isTyping });
+  }, []);
+
+  const logout = useCallback(() => {
+    socket.disconnect();
+    setCurrentUser(null);
+    setOnlineUsers([]);
+    setRooms([]);
+    setActiveRoomId(null);
+    setMessagesByRoom({});
+    setUnreadRoomIds(new Set());
+    setTypingByRoom({});
+    localStorage.removeItem("orbital-chat:session");
+  }, []);
+
+  const value = useMemo<ChatContextValue>(
+    () => ({
+      currentUser,
+      onlineUsers,
+      rooms,
+      activeRoomId,
+      messagesByRoom,
+      unreadRoomIds,
+      typingByRoom,
+      isConnecting,
+      login,
+      openDm,
+      createGroup,
+      selectRoom,
+      sendMessage,
+      setTyping,
+      logout,
+    }),
+    [
+      currentUser,
+      onlineUsers,
+      rooms,
+      activeRoomId,
+      messagesByRoom,
+      unreadRoomIds,
+      typingByRoom,
+      isConnecting,
+      login,
+      openDm,
+      createGroup,
+      selectRoom,
+      sendMessage,
+      setTyping,
+      logout,
+    ]
+  );
+
+  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
 }
 
-export function useCall() {
-  const ctx = useContext(CallContext);
-  if (!ctx) throw new Error("useCall must be used within CallProvider");
+export function useChat() {
+  const ctx = useContext(ChatContext);
+  if (!ctx) throw new Error("useChat must be used within ChatProvider");
   return ctx;
 }
