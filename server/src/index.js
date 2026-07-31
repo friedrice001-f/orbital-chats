@@ -168,16 +168,20 @@ io.on("connection", (socket) => {
   });
 
   /* ---------------------------- CALLS ------------------------------ */
-  socket.on("call:invite", ({ toUserId, offer }, callback) => {
+socket.on("call:invite", ({ toUserId, offer }, callback) => {
+    console.log("[call:invite] from", currentUser?.id, "to", toUserId);
     if (!currentUser) return callback?.({ ok: false, error: "Not authenticated." });
     const target = store.getUserById(toUserId);
+    console.log("[call:invite] target found?", !!target, "online?", target?.online);
     if (!target || !target.online) {
       return callback?.({ ok: false, error: "User is offline." });
     }
+  
     if (activeCallPeer.has(toUserId) || activeCallPeer.has(currentUser.id)) {
       return callback?.({ ok: false, error: "User is busy." });
     }
-    const targetSocket = io.sockets.sockets.get(target.socketId);
+  const targetSocket = io.sockets.sockets.get(target.socketId);
+    console.log("[call:invite] targetSocket found?", !!targetSocket);
     if (!targetSocket) {
       return callback?.({ ok: false, error: "User is offline." });
     }
