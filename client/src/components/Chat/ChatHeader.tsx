@@ -1,6 +1,8 @@
 import { Avatar } from "../common/Avatar";
 import { IconButton } from "../common/IconButton";
-import { BackIcon, SidebarIcon } from "../common/Icons";
+import { BackIcon, SidebarIcon, PhoneIcon } from "../common/Icons";
+import { useChat } from "../../context/ChatContext";
+import { useCall } from "../../context/CallContext";
 import type { RoomSummary } from "../../types";
 
 interface ChatHeaderProps {
@@ -20,6 +22,14 @@ export function ChatHeader({
   onBack,
   onToggleDrawer,
 }: ChatHeaderProps) {
+  const { currentUser } = useChat();
+  const { startCall, status } = useCall();
+
+  const peerId =
+    room.type === "dm" && currentUser
+      ? room.memberIds.find((id) => id !== currentUser.id)
+      : null;
+
   return (
     <div className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-b border-black/5 dark:border-white/5 bg-surface-bright dark:bg-surface-dark-soft">
       <div className="flex items-center gap-3 min-w-0">
@@ -44,9 +54,20 @@ export function ChatHeader({
           </p>
         </div>
       </div>
-      <IconButton onClick={onToggleDrawer} aria-label="Toggle info panel">
-        <SidebarIcon className="w-5 h-5" />
-      </IconButton>
+      <div className="flex items-center gap-1">
+        {peerId && (
+          <IconButton
+            onClick={() => startCall(peerId, room.name)}
+            disabled={status !== "idle"}
+            aria-label="Start voice call"
+          >
+            <PhoneIcon className="w-5 h-5" />
+          </IconButton>
+        )}
+        <IconButton onClick={onToggleDrawer} aria-label="Toggle info panel">
+          <SidebarIcon className="w-5 h-5" />
+        </IconButton>
+      </div>
     </div>
   );
 }
