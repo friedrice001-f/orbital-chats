@@ -226,19 +226,24 @@ socket.on("call:invite", ({ toUserId, offer }, callback) => {
   });
 
   /* -------------------------- DISCONNECT --------------------------- */
-  socket.on("disconnect", () => {
+ socket.on("disconnect", () => {
     if (!currentUser) return;
-    const peerId = endCallFor(currentUser.id);
-    if (peerId) {
-      const peer = store.getUserById(peerId);
-      const peerSocket = peer && io.sockets.sockets.get(peer.socketId);
-      peerSocket?.emit("call:ended", { fromUserId: currentUser.id });
-    }
     store.setUserOffline(socket.id);
     broadcastPresence();
-  });
-});
 
-httpServer.listen(PORT, () => {
-  console.log(`Orbital Chat server listening on port ${PORT}`);
-});
+    const userId = currentUser.id;
+    const disconnectedSocketId = socket.id;
+    const callId = userCall.get(userId);
+    if (!callId) return;
+
+    // Mobile sockets drop and reconnect all the time (screen lock,
+    // backgrounding, network handoff). Give them a few seconds to
+    // reconnect before actually ending an in-progress/ringing call —
+    // if they've reconnected by then, their stored socketId will have
+    // already moved on from this dead one.
+    setTimeout(() => {
+      const user = store.getUserById(userId);
+      if (user && user.socketId !== disconnectedSocketId) return; // reconnected in time
+      endCallInternal(callId);
+    }, 5000);
+  });
