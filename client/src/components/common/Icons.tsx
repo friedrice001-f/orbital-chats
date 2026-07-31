@@ -128,3 +128,15 @@ export const MicOffIcon = (p: SVGProps<SVGSVGElement>) => (
     <path d="M17 16.95A7 7 0 0 1 5 12v-2M12 19v3M2 2l20 20" />
   </svg>
 );
+export const SpeakerIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 9v6h4l5 5V4l-5 5H5Z" />
+    <path d="M16.5 8.5a5 5 0 0 1 0 7M19.5 5.5a9 9 0 0 1 0 13" />
+  </svg>
+);
+
+export const SpeakerOffIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M5 9v6h4l5 5V4l-5 5H5Z" />
+  </svg>
+);
