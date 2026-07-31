@@ -59,6 +59,16 @@ export function CallOverlay() {
   const isVideo = kind === "video";
   const isActive = status === "active";
 
+  // TEMPORARY DEBUG — remove after checking on the Samsung phone
+  useEffect(() => {
+    if (status === "active") {
+      alert(
+        `setSinkId: ${typeof HTMLMediaElement.prototype.setSinkId}\nUA: ${navigator.userAgent}`
+      );
+    }
+  }, [status]);
+  // END TEMPORARY DEBUG
+
   // Register whichever remote media element is currently mounted (video
   // for video calls, audio for voice calls) so toggleSpeaker can call
   // setSinkId on it. Re-runs whenever the video/audio element swaps.
