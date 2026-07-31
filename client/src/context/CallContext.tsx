@@ -1,3 +1,4 @@
+
 import {
   createContext,
   useCallback,
@@ -20,12 +21,15 @@ interface CallContextValue {
   status: CallStatus;
   peerName: string | null;
   isMuted: boolean;
+  isSpeakerOn: boolean;
+  isSpeakerSupported: boolean;
   callDurationSec: number;
   startCall: (peerId: string, peerName: string) => Promise<void>;
   acceptCall: () => Promise<void>;
   rejectCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
+  toggleSpeaker: () => void;
   incomingCall: { fromUserId: string; fromName: string } | null;
 }
 
@@ -36,6 +40,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<CallStatus>("idle");
   const [peerName, setPeerName] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
+  const [isSpeakerSupported, setIsSpeakerSupported] = useState(false);
   const [callDurationSec, setCallDurationSec] = useState(0);
   const [incomingCall, setIncomingCall] = useState<{
     fromUserId: string;
@@ -51,6 +57,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const statusRef = useRef<CallStatus>("idle");
   statusRef.current = status;
 
+  useEffect(() => {
+    const el = remoteAudioRef.current;
+    setIsSpeakerSupported(!!el && typeof (el as any).setSinkId === "function");
+  }, []);
+
   const cleanup = useCallback(() => {
     pcRef.current?.close();
     pcRef.current = null;
@@ -61,6 +72,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setStatus("idle");
     setPeerName(null);
     setIsMuted(false);
+    setIsSpeakerOn(false);
     setIncomingCall(null);
     setCallDurationSec(0);
     if (durationTimerRef.current) {
@@ -175,6 +187,29 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setIsMuted(nextMuted);
   }, [isMuted]);
 
+  const toggleSpeaker = useCallback(async () => {
+    const audioEl = remoteAudioRef.current as any;
+    if (!audioEl || typeof audioEl.setSinkId !== "function") return;
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter((d) => d.kind === "audiooutput");
+      const nextOn = !isSpeakerOn;
+      let targetId = "default";
+      if (nextOn) {
+        const speaker = outputs.find((d) => /speaker/i.test(d.label));
+        if (speaker) targetId = speaker.deviceId;
+      } else {
+        const earpiece = outputs.find((d) => /earpiece|receiver/i.test(d.label));
+        targetId = earpiece ? earpiece.deviceId : "default";
+      }
+      await audioEl.setSinkId(targetId);
+      setIsSpeakerOn(nextOn);
+    } catch {
+      // Output device selection can be unavailable depending on browser
+      // support/permissions; fail silently rather than breaking the call.
+    }
+  }, [isSpeakerOn]);
+
   useEffect(() => {
     function handleIncoming({
       fromUserId,
@@ -235,12 +270,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
         status,
         peerName,
         isMuted,
+        isSpeakerOn,
+        isSpeakerSupported,
         callDurationSec,
         startCall,
         acceptCall,
         rejectCall,
         endCall,
         toggleMute,
+        toggleSpeaker,
         incomingCall,
       }}
     >
