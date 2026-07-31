@@ -1,6 +1,6 @@
 import { useCall } from "../../context/CallContext";
 import { Avatar } from "../common/Avatar";
-import { MicIcon, MicOffIcon, PhoneOffIcon } from "../common/Icons";
+import { MicIcon, MicOffIcon, PhoneOffIcon, SpeakerIcon, SpeakerOffIcon } from "../common/Icons";
 
 function formatDuration(sec: number) {
   const m = Math.floor(sec / 60).toString().padStart(2, "0");
@@ -9,7 +9,17 @@ function formatDuration(sec: number) {
 }
 
 export function ActiveCallScreen() {
-  const { status, peerName, isMuted, callDurationSec, toggleMute, endCall } = useCall();
+  const {
+    status,
+    peerName,
+    isMuted,
+    isSpeakerOn,
+    isSpeakerSupported,
+    callDurationSec,
+    toggleMute,
+    toggleSpeaker,
+    endCall,
+  } = useCall();
   if (status !== "calling" && status !== "connected") return null;
 
   return (
@@ -22,7 +32,7 @@ export function ActiveCallScreen() {
         </p>
       </div>
 
-      <div className="flex items-center gap-8">
+      <div className="flex items-center gap-6">
         <button
           onClick={toggleMute}
           aria-label={isMuted ? "Unmute" : "Mute"}
@@ -30,6 +40,25 @@ export function ActiveCallScreen() {
         >
           {isMuted ? <MicOffIcon className="w-6 h-6" /> : <MicIcon className="w-6 h-6" />}
         </button>
+
+        {isSpeakerSupported && (
+          <button
+            onClick={toggleSpeaker}
+            aria-label={isSpeakerOn ? "Turn speaker off" : "Turn speaker on"}
+            className={
+              isSpeakerOn
+                ? "w-14 h-14 rounded-full bg-glow-cyan text-surface-dark flex items-center justify-center"
+                : "w-14 h-14 rounded-full bg-white/10 text-text-dark flex items-center justify-center"
+            }
+          >
+            {isSpeakerOn ? (
+              <SpeakerIcon className="w-6 h-6" />
+            ) : (
+              <SpeakerOffIcon className="w-6 h-6" />
+            )}
+          </button>
+        )}
+
         <button
           onClick={endCall}
           aria-label="End call"
