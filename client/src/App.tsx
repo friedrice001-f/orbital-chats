@@ -3,7 +3,8 @@ import { ChatProvider, useChat } from "./context/ChatContext";
 import { CallProvider } from "./context/CallContext";
 import { LoginScreen } from "./components/Login/LoginScreen";
 import { AppShell } from "./components/Layout/AppShell";
-import { CallOverlay } from "./components/Call/CallOverlay";
+import { ActiveCallScreen } from "./components/Call/ActiveCallScreen";
+import { IncomingCallModal } from "./components/Call/IncomingCallModal";
 
 function Root() {
   const { currentUser } = useChat();
@@ -13,9 +14,10 @@ export default function App() {
   return (
     <ThemeProvider>
       <ChatProvider>
-       <CallProvider>
+        <CallProvider>
           <Root />
-          <CallOverlay />
+          <ActiveCallScreen />
+          <IncomingCallModal />
         </CallProvider>
       </ChatProvider>
     </ThemeProvider>
