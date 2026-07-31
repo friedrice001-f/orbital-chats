@@ -7,5 +7,5 @@ const SERVER_URL = import.meta.env.VITE_SERVER_URL || "http://localhost:4000";
 // has entered their phone number on the login screen.
 export const socket: Socket = io(SERVER_URL, {
   autoConnect: false,
-  transports: ["websocket", "polling"],
+  transports: ["polling", "websocket"],
 });
