@@ -37,9 +37,9 @@ interface CallContextValue {
 
 const CallContext = createContext<CallContextValue | null>(null);
 
-const ICE_SERVERS: RTCConfiguration = {
+   const ICE_SERVERS: RTCConfiguration = {
+  iceTransportPolicy: "relay",
   iceServers: [
-    { urls: "stun:stun.relay.metered.ca:80" },
     {
       urls: "turn:global.relay.metered.ca:80",
       username: "ea791fc601b5a9a0521404a8",
@@ -142,13 +142,22 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
         setStatus("connected");
-      } else if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+      } else if (pc.connectionState === "failed") {
+        if (statusRef.current !== "idle") {
+          setTimeout(() => {
+            if (pc.connectionState === "failed" && statusRef.current !== "idle") {
+              setErrorMessage("Call connection failed.");
+              teardownRef.current?.();
+            }
+          }, 8000);
+        }
+      } else if (pc.connectionState === "closed") {
         if (statusRef.current !== "idle") {
           setErrorMessage("Call connection failed.");
           teardownRef.current?.();
         }
       }
-    };
+    }; 
 
     pcRef.current = pc;
     return pc;
