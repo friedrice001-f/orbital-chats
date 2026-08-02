@@ -132,6 +132,18 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pc.ontrack = (event) => {
       setRemoteStream(event.streams[0] ?? null);
     };
+setInterval(async () => {
+      if (pc.connectionState !== "connected") return;
+      const stats = await pc.getStats();
+      stats.forEach((report) => {
+        if (report.type === "outbound-rtp" && report.kind === "video") {
+          console.log("OUTBOUND video bytes sent:", report.bytesSent);
+        }
+        if (report.type === "inbound-rtp" && report.kind === "video") {
+          console.log("INBOUND video bytes received:", report.bytesReceived, "packets lost:", report.packetsLost);
+        }
+      });
+    }, 3000);
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
