@@ -42,6 +42,8 @@ export function ActiveCallScreen() {
 
   // Local preview: always muted via the DOM property (not the JSX attribute,
   // which React doesn't reliably sync), and only play once metadata is ready.
+  // Depends on `status` too, so it re-attaches once the call screen actually
+  // mounts (the stream can be captured before this component exists).
   useEffect(() => {
     const el = localVideoRef.current;
     if (!el) return;
@@ -52,7 +54,7 @@ export function ActiveCallScreen() {
       if (el.readyState >= 1) tryPlay();
       else el.onloadedmetadata = tryPlay;
     }
-  }, [localStream]);
+  }, [localStream, status]);
 
   useEffect(() => {
     const el = remoteVideoRef.current;
@@ -63,7 +65,7 @@ export function ActiveCallScreen() {
       if (el.readyState >= 1) tryPlay();
       else el.onloadedmetadata = tryPlay;
     }
-  }, [remoteStream]);
+  }, [remoteStream, status]);
 
   useEffect(() => {
     registerRemoteMediaElement(remoteVideoRef.current);
