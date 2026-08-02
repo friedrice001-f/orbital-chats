@@ -34,24 +34,18 @@ interface CallContextValue {
   toggleSpeaker: () => void;
   registerRemoteMediaElement: (el: HTMLVideoElement | null) => void;
 }
-
 const CallContext = createContext<CallContextValue | null>(null);
 
    const ICE_SERVERS: RTCConfiguration = {
   iceTransportPolicy: "relay",
   iceServers: [
     {
-      urls: "turn:global.relay.metered.ca:80",
-      username: "ea791fc601b5a9a0521404a8",
-      credential: "y83LlUrGQehWPEgL",
-    },
-    {
       urls: "turn:global.relay.metered.ca:80?transport=tcp",
       username: "ea791fc601b5a9a0521404a8",
       credential: "y83LlUrGQehWPEgL",
     },
     {
-      urls: "turn:global.relay.metered.ca:443",
+      urls: "turn:global.relay.metered.ca:443?transport=tcp",
       username: "ea791fc601b5a9a0521404a8",
       credential: "y83LlUrGQehWPEgL",
     },
