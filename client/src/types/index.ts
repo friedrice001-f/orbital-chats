@@ -64,8 +64,10 @@ export interface TypingEvent {
 }
 
 export type CallStatus = "idle" | "calling" | "ringing" | "connected";
+export type CallType = "voice" | "video";
 
 export interface IncomingCallInfo {
   fromUserId: string;
   fromName: string;
+  callType: CallType;
 }

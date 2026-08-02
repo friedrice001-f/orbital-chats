@@ -56,13 +56,24 @@ export function ChatHeader({
       </div>
       <div className="flex items-center gap-1">
         {peerId && (
-          <IconButton
-            onClick={() => startCall(peerId, room.name)}
-            disabled={status !== "idle"}
-            aria-label="Start voice call"
-          >
-            <PhoneIcon className="w-5 h-5" />
-          </IconButton>
+          <>
+            <IconButton
+              onClick={() => startCall(peerId, room.name, "voice")}
+              disabled={status !== "idle"}
+              aria-label="Start voice call"
+            >
+              <PhoneIcon className="w-5 h-5" />
+            </IconButton>
+            <IconButton
+              onClick={() => startCall(peerId, room.name, "video")}
+              disabled={status !== "idle"}
+              aria-label="Start video call"
+            >
+              <span className="w-5 h-5 flex items-center justify-center text-base leading-none">
+                🎥
+              </span>
+            </IconButton>
+          </>
         )}
         <IconButton onClick={onToggleDrawer} aria-label="Toggle info panel">
           <SidebarIcon className="w-5 h-5" />

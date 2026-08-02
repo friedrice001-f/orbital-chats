@@ -10,33 +10,52 @@ import {
 } from "react";
 import { socket } from "../lib/socket";
 import { useChat } from "./ChatContext";
-import type { CallStatus, IncomingCallInfo } from "../types";
+import type { CallStatus, CallType, IncomingCallInfo } from "../types";
 
 interface CallContextValue {
   status: CallStatus;
+  callType: CallType | null;
   peerName: string | null;
   incomingCall: IncomingCallInfo | null;
   isMuted: boolean;
+  isCameraOff: boolean;
   isSpeakerOn: boolean;
   isSpeakerSupported: boolean;
   callDurationSec: number;
   errorMessage: string | null;
-  startCall: (peerId: string, peerName: string) => Promise<void>;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
+  startCall: (peerId: string, peerName: string, callType: CallType) => Promise<void>;
   acceptCall: () => Promise<void>;
   rejectCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
+  toggleCamera: () => void;
   toggleSpeaker: () => void;
+  registerRemoteMediaElement: (el: HTMLVideoElement | null) => void;
 }
 
 const CallContext = createContext<CallContextValue | null>(null);
 
-// Public STUN servers only — no TURN relay, so calls between two peers both
-// behind restrictive/symmetric NATs may fail to connect.
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
 };
 
@@ -44,13 +63,17 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const { currentUser } = useChat();
 
   const [status, setStatus] = useState<CallStatus>("idle");
+  const [callType, setCallType] = useState<CallType | null>(null);
   const [peerName, setPeerName] = useState<string | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [isCameraOff, setIsCameraOff] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isSpeakerSupported, setIsSpeakerSupported] = useState(false);
   const [callDurationSec, setCallDurationSec] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -58,7 +81,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const remoteMediaElRef = useRef<HTMLVideoElement | null>(null);
 
   const statusRef = useRef<CallStatus>("idle");
   statusRef.current = status;
@@ -80,17 +103,20 @@ export function CallProvider({ children }: { children: ReactNode }) {
     pcRef.current = null;
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
     peerIdRef.current = null;
     pendingOfferRef.current = null;
     pendingCandidatesRef.current = [];
     stopTimer();
     setStatus("idle");
+    setCallType(null);
     setPeerName(null);
     setIncomingCall(null);
     setIsMuted(false);
+    setIsCameraOff(false);
     setIsSpeakerOn(false);
     setCallDurationSec(0);
-    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
   }, [stopTimer]);
 
   const teardownRef = useRef(teardown);
@@ -106,13 +132,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (event) => {
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = event.streams[0] ?? null;
-      }
-      setIsSpeakerSupported(
-        !!remoteAudioRef.current &&
-          typeof (remoteAudioRef.current as any).setSinkId === "function"
-      );
+      setRemoteStream(event.streams[0] ?? null);
     };
 
     pc.onconnectionstatechange = () => {
@@ -130,33 +150,41 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return pc;
   }, []);
 
-  const getMedia = useCallback(async () => {
-    return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  const getMedia = useCallback(async (type: CallType) => {
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: type === "video" });
   }, []);
 
   const startCall = useCallback(
-    async (peerId: string, name: string) => {
+    async (peerId: string, name: string, type: CallType) => {
       setErrorMessage(null);
       let stream: MediaStream;
       try {
-        stream = await getMedia();
+        stream = await getMedia(type);
       } catch {
-        setErrorMessage("Couldn't access microphone. Check permissions.");
+        setErrorMessage(
+          type === "video"
+            ? "Couldn't access camera/microphone. Check permissions."
+            : "Couldn't access microphone. Check permissions."
+        );
         return;
       }
 
       localStreamRef.current = stream;
+      setLocalStream(stream);
       peerIdRef.current = peerId;
+      setCallType(type);
       const pc = createPeerConnection(peerId);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
       try {
+        
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        const plainOffer = { type: offer.type, sdp: offer.sdp };
 
         socket.emit(
           "call:invite",
-          { toUserId: peerId, offer },
+          { toUserId: peerId, offer: plainOffer, callType: type },
           (result: { ok: boolean; error?: string }) => {
             if (!result.ok) {
               setErrorMessage(result.error || "Couldn't start the call.");
@@ -182,9 +210,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     let stream: MediaStream;
     try {
-      stream = await getMedia();
+      stream = await getMedia(incoming.callType);
     } catch {
-      setErrorMessage("Couldn't access microphone. Check permissions.");
+      setErrorMessage(
+        incoming.callType === "video"
+          ? "Couldn't access camera/microphone. Check permissions."
+          : "Couldn't access microphone. Check permissions."
+      );
       socket.emit("call:reject", { toUserId: incoming.fromUserId });
       setIncomingCall(null);
       pendingOfferRef.current = null;
@@ -192,7 +224,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
 
     localStreamRef.current = stream;
+    setLocalStream(stream);
     peerIdRef.current = incoming.fromUserId;
+    setCallType(incoming.callType);
     const pc = createPeerConnection(incoming.fromUserId);
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -205,7 +239,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
-    socket.emit("call:accept", { toUserId: incoming.fromUserId, answer });
+    const plainAnswer = { type: answer.type, sdp: answer.sdp };
+    socket.emit("call:accept", { toUserId: incoming.fromUserId, answer: plainAnswer });
 
     setPeerName(incoming.fromName);
     setIncomingCall(null);
@@ -236,8 +271,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setIsMuted(nextMuted);
   }, [isMuted]);
 
+  const toggleCamera = useCallback(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    const nextOff = !isCameraOff;
+    stream.getVideoTracks().forEach((t) => (t.enabled = !nextOff));
+    setIsCameraOff(nextOff);
+  }, [isCameraOff]);
+
   const toggleSpeaker = useCallback(async () => {
-    const el = remoteAudioRef.current as any;
+    const el = remoteMediaElRef.current as any;
     if (!el || typeof el.setSinkId !== "function") return;
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -258,6 +301,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, [isSpeakerOn]);
 
+  const registerRemoteMediaElement = useCallback((el: HTMLVideoElement | null) => {
+    remoteMediaElRef.current = el;
+    setIsSpeakerSupported(!!el && typeof (el as any).setSinkId === "function");
+  }, []);
+
   useEffect(() => {
     if (status === "connected" && !timerRef.current) {
       timerRef.current = setInterval(() => setCallDurationSec((d) => d + 1), 1000);
@@ -270,10 +318,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
       fromUserId: string;
       fromName: string;
       offer: RTCSessionDescriptionInit;
+      callType: CallType;
     }) {
       if (statusRef.current !== "idle") return;
       pendingOfferRef.current = payload.offer;
-      setIncomingCall({ fromUserId: payload.fromUserId, fromName: payload.fromName });
+      setIncomingCall({
+        fromUserId: payload.fromUserId,
+        fromName: payload.fromName,
+        callType: payload.callType || "voice",
+      });
       setStatus("ringing");
     }
 
@@ -286,8 +339,10 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }) {
       if (fromUserId !== peerIdRef.current) return;
       const pc = pcRef.current;
-      if (!pc) return;
+      if (!pc || !answer || !answer.type) return;
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+
       for (const candidate of pendingCandidatesRef.current) {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
       }
@@ -346,44 +401,51 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const value = useMemo<CallContextValue>(
     () => ({
       status,
+      callType,
       peerName,
       incomingCall,
       isMuted,
+      isCameraOff,
       isSpeakerOn,
       isSpeakerSupported,
       callDurationSec,
       errorMessage,
+      localStream,
+      remoteStream,
       startCall,
       acceptCall,
       rejectCall,
       endCall,
       toggleMute,
+      toggleCamera,
       toggleSpeaker,
+      registerRemoteMediaElement,
     }),
     [
       status,
+      callType,
       peerName,
       incomingCall,
       isMuted,
+      isCameraOff,
       isSpeakerOn,
       isSpeakerSupported,
       callDurationSec,
       errorMessage,
+      localStream,
+      remoteStream,
       startCall,
       acceptCall,
       rejectCall,
       endCall,
       toggleMute,
+      toggleCamera,
       toggleSpeaker,
+      registerRemoteMediaElement,
     ]
   );
 
-  return (
-    <CallContext.Provider value={value}>
-      {children}
-      <audio ref={remoteAudioRef} autoPlay style={{ display: "none" }} />
-    </CallContext.Provider>
-  );
+  return <CallContext.Provider value={value}>{children}</CallContext.Provider>;
 }
 
 export function useCall() {

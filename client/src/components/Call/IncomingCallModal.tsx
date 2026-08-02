@@ -16,7 +16,7 @@ export function IncomingCallModal() {
           {incomingCall.fromName}
         </p>
         <p className="text-sm text-text-bright/60 dark:text-text-dark/60">
-          Incoming voice call…
+          {incomingCall.callType === "video" ? "Incoming video call…" : "Incoming voice call…"}
         </p>
         <div className="mt-6 flex justify-center gap-6">
           <button

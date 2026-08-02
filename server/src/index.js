@@ -11,15 +11,27 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 
+const allowedOrigin = (origin, callback) => {
+  if (
+    !origin ||
+    origin === CLIENT_ORIGIN ||
+    origin.endsWith(".app.github.dev") ||
+    origin === "https://orbital-chats.onrender.com"
+  ) {
+    return callback(null, true);
+  }
+  callback(new Error("Not allowed by CORS"));
+};
+
 const app = express();
-app.use(cors({ origin: CLIENT_ORIGIN }));
+app.use(cors({ origin: allowedOrigin }));
 app.use(express.json({ limit: "8mb" }));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: { origin: CLIENT_ORIGIN, methods: ["GET", "POST"] },
+  cors: { origin: allowedOrigin, methods: ["GET", "POST"] },
   maxHttpBufferSize: 8 * 1024 * 1024,
 });
 
@@ -168,7 +180,7 @@ io.on("connection", (socket) => {
   });
 
   /* ---------------------------- CALLS ------------------------------ */
-socket.on("call:invite", ({ toUserId, offer }, callback) => {
+  socket.on("call:invite", ({ toUserId, offer, callType }, callback) => {
     console.log("[call:invite] from", currentUser?.id, "to", toUserId);
     if (!currentUser) return callback?.({ ok: false, error: "Not authenticated." });
     const target = store.getUserById(toUserId);
@@ -176,11 +188,11 @@ socket.on("call:invite", ({ toUserId, offer }, callback) => {
     if (!target || !target.online) {
       return callback?.({ ok: false, error: "User is offline." });
     }
-  
+
     if (activeCallPeer.has(toUserId) || activeCallPeer.has(currentUser.id)) {
       return callback?.({ ok: false, error: "User is busy." });
     }
-  const targetSocket = io.sockets.sockets.get(target.socketId);
+    const targetSocket = io.sockets.sockets.get(target.socketId);
     console.log("[call:invite] targetSocket found?", !!targetSocket);
     if (!targetSocket) {
       return callback?.({ ok: false, error: "User is offline." });
@@ -191,6 +203,7 @@ socket.on("call:invite", ({ toUserId, offer }, callback) => {
       fromUserId: currentUser.id,
       fromName: currentUser.displayName,
       offer,
+      callType: callType || "voice",
     });
     callback?.({ ok: true });
   });
@@ -225,7 +238,7 @@ socket.on("call:invite", ({ toUserId, offer }, callback) => {
     targetSocket?.emit("call:ice-candidate", { fromUserId: currentUser.id, candidate });
   });
 
-/* -------------------------- DISCONNECT --------------------------- */
+  /* -------------------------- DISCONNECT --------------------------- */
   socket.on("disconnect", () => {
     if (!currentUser) return;
     store.setUserOffline(socket.id);
@@ -235,14 +248,9 @@ socket.on("call:invite", ({ toUserId, offer }, callback) => {
     const disconnectedSocketId = socket.id;
     if (!activeCallPeer.has(userId)) return;
 
-    // Mobile sockets drop and reconnect all the time (screen lock,
-    // backgrounding, network handoff). Give them a few seconds to
-    // reconnect before actually ending an in-progress/ringing call —
-    // if they've reconnected by then, their stored socketId will have
-    // already moved on from this dead one.
     setTimeout(() => {
       const user = store.getUserById(userId);
-      if (user && user.socketId !== disconnectedSocketId) return; // reconnected in time
+      if (user && user.socketId !== disconnectedSocketId) return;
       const peerId = endCallFor(userId);
       if (peerId) {
         const peer = store.getUserById(peerId);
