@@ -58,6 +58,7 @@ const CallContext = createContext<CallContextValue | null>(null);
 };
 
 export function CallProvider({ children }: { children: ReactNode }) {
+  console.log("CALLPROVIDER VERSION: v2");
   const { currentUser } = useChat();
 
   const [status, setStatus] = useState<CallStatus>("idle");
@@ -130,6 +131,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     };
 
     pc.ontrack = (event) => {
+      console.log("TRACK RECEIVED:", event.track.kind, event.streams[0]?.id);
       setRemoteStream(event.streams[0] ?? null);
     };
 setInterval(async () => {
@@ -145,7 +147,8 @@ setInterval(async () => {
       });
     }, 3000);
 
-    pc.onconnectionstatechange = () => {
+   pc.onconnectionstatechange = () => {
+      console.log("CONNECTION STATE:", pc.connectionState);
       if (pc.connectionState === "connected") {
         setStatus("connected");
       } else if (pc.connectionState === "failed") {
