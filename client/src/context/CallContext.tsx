@@ -199,15 +199,10 @@ setInterval(async () => {
       setCallType(type);
       
       const pc = createPeerConnection(peerId);
-      const senders = pc.getSenders();
-      stream.getTracks().forEach((track) => {
-        const sender = senders.find((s) => s.track === null && s.track?.kind === undefined);
-      });
       pc.getTransceivers().forEach((t) => {
         const track = stream.getTracks().find((tr) => tr.kind === t.receiver.track.kind);
         if (track) t.sender.replaceTrack(track);
       });
-
       try {
         
         const offer = await pc.createOffer();
