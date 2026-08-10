@@ -123,6 +123,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const createPeerConnection = useCallback((toUserId: string) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
+    pc.addTransceiver("audio", { direction: "sendrecv" });
+    pc.addTransceiver("video", { direction: "sendrecv" });
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -195,8 +197,16 @@ setInterval(async () => {
       setLocalStream(stream);
       peerIdRef.current = peerId;
       setCallType(type);
+      
       const pc = createPeerConnection(peerId);
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      const senders = pc.getSenders();
+      stream.getTracks().forEach((track) => {
+        const sender = senders.find((s) => s.track === null && s.track?.kind === undefined);
+      });
+      pc.getTransceivers().forEach((t) => {
+        const track = stream.getTracks().find((tr) => tr.kind === t.receiver.track.kind);
+        if (track) t.sender.replaceTrack(track);
+      });
 
       try {
         
@@ -249,8 +259,11 @@ setInterval(async () => {
     setLocalStream(stream);
     peerIdRef.current = incoming.fromUserId;
     setCallType(incoming.callType);
-    const pc = createPeerConnection(incoming.fromUserId);
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+const pc = createPeerConnection(incoming.fromUserId);
+    pc.getTransceivers().forEach((t) => {
+      const track = stream.getTracks().find((tr) => tr.kind === t.receiver.track.kind);
+      if (track) t.sender.replaceTrack(track);
+    });
 
     await pc.setRemoteDescription(new RTCSessionDescription(pendingOfferRef.current));
     for (const candidate of pendingCandidatesRef.current) {
