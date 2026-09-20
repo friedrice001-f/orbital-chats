@@ -18,7 +18,6 @@ interface CallContextValue {
   peerName: string | null;
   incomingCall: IncomingCallInfo | null;
   isMuted: boolean;
-  isCameraOff: boolean;
   isSpeakerOn: boolean;
   isSpeakerSupported: boolean;
   callDurationSec: number;
@@ -30,7 +29,6 @@ interface CallContextValue {
   rejectCall: () => void;
   endCall: () => void;
   toggleMute: () => void;
-  toggleCamera: () => void;
   toggleSpeaker: () => void;
   registerRemoteMediaElement: (el: HTMLVideoElement | null) => void;
 }
@@ -58,7 +56,7 @@ const ICE_SERVERS: RTCConfiguration = {
 };
 
 export function CallProvider({ children }: { children: ReactNode }) {
-  console.log("CALLPROVIDER VERSION: v3");
+  console.log("CALLPROVIDER VERSION: v4");
   const { currentUser } = useChat();
 
   const [status, setStatus] = useState<CallStatus>("idle");
@@ -66,7 +64,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [peerName, setPeerName] = useState<string | null>(null);
   const [incomingCall, setIncomingCall] = useState<IncomingCallInfo | null>(null);
   const [isMuted, setIsMuted] = useState(false);
-  const [isCameraOff, setIsCameraOff] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [isSpeakerSupported, setIsSpeakerSupported] = useState(false);
   const [callDurationSec, setCallDurationSec] = useState(0);
@@ -113,7 +110,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     setPeerName(null);
     setIncomingCall(null);
     setIsMuted(false);
-    setIsCameraOff(false);
     setIsSpeakerOn(false);
     setCallDurationSec(0);
   }, [stopTimer]);
@@ -146,11 +142,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (pc.connectionState !== "connected") return;
       const stats = await pc.getStats();
       stats.forEach((report) => {
-        if (report.type === "outbound-rtp" && report.kind === "video") {
-          console.log("OUTBOUND video bytes sent:", report.bytesSent);
+        if (report.type === "outbound-rtp" && report.kind === "audio") {
+          console.log("OUTBOUND audio bytes sent:", report.bytesSent);
         }
-        if (report.type === "inbound-rtp" && report.kind === "video") {
-          console.log("INBOUND video bytes received:", report.bytesReceived, "packets lost:", report.packetsLost);
+        if (report.type === "inbound-rtp" && report.kind === "audio") {
+          console.log("INBOUND audio bytes received:", report.bytesReceived, "packets lost:", report.packetsLost);
         }
       });
     }, 3000);
@@ -186,8 +182,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return pc;
   }, []);
 
-  const getMedia = useCallback(async (type: CallType) => {
-    return navigator.mediaDevices.getUserMedia({ audio: true, video: type === "video" });
+  // Audio-only: video is never requested, regardless of what's passed in.
+  const getMedia = useCallback(async () => {
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
   }, []);
 
   const startCall = useCallback(
@@ -195,13 +192,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setErrorMessage(null);
       let stream: MediaStream;
       try {
-        stream = await getMedia(type);
+        stream = await getMedia();
       } catch {
-        setErrorMessage(
-          type === "video"
-            ? "Couldn't access camera/microphone. Check permissions."
-            : "Couldn't access microphone. Check permissions."
-        );
+        setErrorMessage("Couldn't access microphone. Check permissions.");
         return;
       }
 
@@ -245,13 +238,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
     let stream: MediaStream;
     try {
-      stream = await getMedia(incoming.callType);
+      stream = await getMedia();
     } catch {
-      setErrorMessage(
-        incoming.callType === "video"
-          ? "Couldn't access camera/microphone. Check permissions."
-          : "Couldn't access microphone. Check permissions."
-      );
+      setErrorMessage("Couldn't access microphone. Check permissions.");
       socket.emit("call:reject", { toUserId: incoming.fromUserId });
       setIncomingCall(null);
       pendingOfferRef.current = null;
@@ -306,14 +295,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
     stream.getAudioTracks().forEach((t) => (t.enabled = !nextMuted));
     setIsMuted(nextMuted);
   }, [isMuted]);
-
-  const toggleCamera = useCallback(() => {
-    const stream = localStreamRef.current;
-    if (!stream) return;
-    const nextOff = !isCameraOff;
-    stream.getVideoTracks().forEach((t) => (t.enabled = !nextOff));
-    setIsCameraOff(nextOff);
-  }, [isCameraOff]);
 
   const toggleSpeaker = useCallback(async () => {
     const el = remoteMediaElRef.current as any;
@@ -442,7 +423,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
       peerName,
       incomingCall,
       isMuted,
-      isCameraOff,
       isSpeakerOn,
       isSpeakerSupported,
       callDurationSec,
@@ -454,7 +434,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
       rejectCall,
       endCall,
       toggleMute,
-      toggleCamera,
       toggleSpeaker,
       registerRemoteMediaElement,
     }),
@@ -464,7 +443,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
       peerName,
       incomingCall,
       isMuted,
-      isCameraOff,
       isSpeakerOn,
       isSpeakerSupported,
       callDurationSec,
@@ -476,7 +454,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
       rejectCall,
       endCall,
       toggleMute,
-      toggleCamera,
       toggleSpeaker,
       registerRemoteMediaElement,
     ]
