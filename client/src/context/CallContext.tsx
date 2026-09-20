@@ -36,7 +36,7 @@ interface CallContextValue {
 }
 const CallContext = createContext<CallContextValue | null>(null);
 
-   const ICE_SERVERS: RTCConfiguration = {
+const ICE_SERVERS: RTCConfiguration = {
   iceTransportPolicy: "relay",
   iceServers: [
     {
@@ -58,7 +58,7 @@ const CallContext = createContext<CallContextValue | null>(null);
 };
 
 export function CallProvider({ children }: { children: ReactNode }) {
-  console.log("CALLPROVIDER VERSION: v2");
+  console.log("CALLPROVIDER VERSION: v3");
   const { currentUser } = useChat();
 
   const [status, setStatus] = useState<CallStatus>("idle");
@@ -121,12 +121,15 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const teardownRef = useRef(teardown);
   teardownRef.current = teardown;
 
- const createPeerConnection = useCallback((toUserId: string) => {
-    const pc = new RTCPeerConnection(ICE_SERVERS); 
+  const createPeerConnection = useCallback((toUserId: string) => {
+    const pc = new RTCPeerConnection(ICE_SERVERS);
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log("SENDING CANDIDATE:", event.candidate.type, event.candidate.protocol);
         socket.emit("call:ice-candidate", { toUserId, candidate: event.candidate.toJSON() });
+      } else {
+        console.log("CANDIDATE GATHERING COMPLETE");
       }
     };
 
@@ -134,7 +137,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       console.log("TRACK RECEIVED:", event.track.kind, event.streams[0]?.id);
       setRemoteStream(event.streams[0] ?? null);
     };
-setInterval(async () => {
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("ICE CONNECTION STATE:", pc.iceConnectionState);
+    };
+
+    setInterval(async () => {
       if (pc.connectionState !== "connected") return;
       const stats = await pc.getStats();
       stats.forEach((report) => {
@@ -147,7 +155,7 @@ setInterval(async () => {
       });
     }, 3000);
 
-   pc.onconnectionstatechange = () => {
+    pc.onconnectionstatechange = () => {
       console.log("CONNECTION STATE:", pc.connectionState);
       if (pc.connectionState === "connected") {
         setStatus("connected");
@@ -156,6 +164,9 @@ setInterval(async () => {
           setTimeout(() => {
             if (pc.connectionState === "failed" && statusRef.current !== "idle") {
               setErrorMessage("Call connection failed.");
+              if (peerIdRef.current) {
+                socket.emit("call:end", { toUserId: peerIdRef.current });
+              }
               teardownRef.current?.();
             }
           }, 8000);
@@ -163,10 +174,13 @@ setInterval(async () => {
       } else if (pc.connectionState === "closed") {
         if (statusRef.current !== "idle") {
           setErrorMessage("Call connection failed.");
+          if (peerIdRef.current) {
+            socket.emit("call:end", { toUserId: peerIdRef.current });
+          }
           teardownRef.current?.();
         }
       }
-    }; 
+    };
 
     pcRef.current = pc;
     return pc;
@@ -195,11 +209,10 @@ setInterval(async () => {
       setLocalStream(stream);
       peerIdRef.current = peerId;
       setCallType(type);
-      
-     const pc = createPeerConnection(peerId);
+
+      const pc = createPeerConnection(peerId);
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
       try {
-        
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         const plainOffer = { type: offer.type, sdp: offer.sdp };
@@ -249,7 +262,8 @@ setInterval(async () => {
     setLocalStream(stream);
     peerIdRef.current = incoming.fromUserId;
     setCallType(incoming.callType);
-const pc = createPeerConnection(incoming.fromUserId);
+
+    const pc = createPeerConnection(incoming.fromUserId);
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
     await pc.setRemoteDescription(new RTCSessionDescription(pendingOfferRef.current));
@@ -343,6 +357,7 @@ const pc = createPeerConnection(incoming.fromUserId);
       callType: CallType;
     }) {
       if (statusRef.current !== "idle") return;
+      peerIdRef.current = payload.fromUserId;
       pendingOfferRef.current = payload.offer;
       setIncomingCall({
         fromUserId: payload.fromUserId,
@@ -363,7 +378,6 @@ const pc = createPeerConnection(incoming.fromUserId);
       const pc = pcRef.current;
       if (!pc || !answer || !answer.type) return;
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
-
 
       for (const candidate of pendingCandidatesRef.current) {
         await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -391,6 +405,7 @@ const pc = createPeerConnection(incoming.fromUserId);
       fromUserId: string;
       candidate: RTCIceCandidateInit;
     }) {
+      console.log("RECEIVED CANDIDATE from", fromUserId, candidate.candidate);
       if (fromUserId !== peerIdRef.current) return;
       const pc = pcRef.current;
       if (pc && pc.remoteDescription) {
