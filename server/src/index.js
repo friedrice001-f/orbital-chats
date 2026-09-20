@@ -11,6 +11,11 @@ const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 
 const PHONE_RE = /^\+?[0-9]{7,15}$/;
 
+// Image limits (must stay in step with the limits in MessageInput.tsx)
+const MAX_IMAGES_PER_MESSAGE = 10;
+const MAX_IMAGE_DATAURL_CHARS = 7_000_000; // ~5MB file once base64-encoded
+const MAX_TOTAL_DATAURL_CHARS = 28_000_000; // ~20MB of files once base64-encoded
+
 const allowedOrigin = (origin, callback) => {
   if (
     !origin ||
@@ -32,7 +37,8 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: allowedOrigin, methods: ["GET", "POST"] },
-  maxHttpBufferSize: 8 * 1024 * 1024,
+  // Several photos in one message need far more room than the old 8MB.
+  maxHttpBufferSize: 32 * 1024 * 1024,
 });
 
 // userId -> peerUserId, tracks who's currently on a call so we can reject
@@ -70,6 +76,39 @@ function roomView(room, forUserId) {
     name: room.name,
     memberIds: room.memberIds,
   };
+}
+
+// Turns whatever the client sent (`images` array and/or legacy `image`) into a
+// clean array of { dataUrl, name, mime }. Returns { images } or { error }.
+function normalizeImages(images, image) {
+  let list = [];
+  if (Array.isArray(images) && images.length > 0) list = images;
+  else if (image) list = [image];
+
+  if (list.length > MAX_IMAGES_PER_MESSAGE) {
+    return { error: `You can send up to ${MAX_IMAGES_PER_MESSAGE} photos at once.` };
+  }
+
+  const cleaned = [];
+  let total = 0;
+  for (const img of list) {
+    if (!img || typeof img.dataUrl !== "string" || !img.dataUrl.startsWith("data:image/")) {
+      return { error: "Invalid image." };
+    }
+    if (img.dataUrl.length > MAX_IMAGE_DATAURL_CHARS) {
+      return { error: "Image is too large." };
+    }
+    total += img.dataUrl.length;
+    if (total > MAX_TOTAL_DATAURL_CHARS) {
+      return { error: "Photos are too large in total. Send fewer at once." };
+    }
+    cleaned.push({
+      dataUrl: img.dataUrl,
+      name: typeof img.name === "string" ? img.name : "image",
+      mime: typeof img.mime === "string" ? img.mime : "image/jpeg",
+    });
+  }
+  return { images: cleaned };
 }
 
 io.on("connection", (socket) => {
@@ -147,24 +186,36 @@ io.on("connection", (socket) => {
   });
 
   /* ---------------------------- MESSAGES --------------------------- */
-  socket.on("message:send", ({ roomId, text, image }, callback) => {
+  socket.on("message:send", ({ roomId, text, image, images }, callback) => {
     if (!currentUser) return callback?.({ ok: false, error: "Not authenticated." });
     if (!store.isMember(roomId, currentUser.id)) {
       return callback?.({ ok: false, error: "You are not part of this conversation." });
     }
-    if (!text && !image) {
-      return callback?.({ ok: false, error: "Empty message." });
+
+    const normalized = normalizeImages(images, image);
+    if (normalized.error) {
+      return callback?.({ ok: false, error: normalized.error });
     }
-    if (image?.dataUrl && image.dataUrl.length > 6_000_000) {
-      return callback?.({ ok: false, error: "Image is too large." });
+    const cleanImages = normalized.images;
+
+    if (!text && cleanImages.length === 0) {
+      return callback?.({ ok: false, error: "Empty message." });
     }
 
     const message = store.addMessage({
       roomId,
       senderId: currentUser.id,
       text,
-      image,
+      // `image` (first photo) keeps older clients and store.js working
+      image: cleanImages[0] || null,
+      images: cleanImages.length > 0 ? cleanImages : undefined,
     });
+
+    // If store.addMessage doesn't copy the `images` field itself, add it here so
+    // it is still sent live (and kept in history, since it is the stored object).
+    if (cleanImages.length > 0 && !message.images) {
+      message.images = cleanImages;
+    }
 
     io.to(roomId).emit("message:new", message);
     callback?.({ ok: true, message });
