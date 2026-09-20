@@ -4,16 +4,33 @@ import { CloseIcon, PaperclipIcon, SendIcon } from "../common/Icons";
 import type { ImagePayload } from "../../types";
 
 const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB — demo-scale guard
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB per image
+const MAX_IMAGES = 10; // per message
+const MAX_TOTAL_BYTES = 20 * 1024 * 1024; // 20MB per message
 
 interface MessageInputProps {
-  onSend: (text: string, image?: ImagePayload | null) => void;
+  onSend: (text: string, images?: ImagePayload[] | null) => void;
   onTyping: (isTyping: boolean) => void;
+}
+
+function readAsImagePayload(file: File): Promise<ImagePayload & { size: number }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      resolve({
+        dataUrl: reader.result as string,
+        name: file.name,
+        mime: file.type,
+        size: file.size,
+      });
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
 }
 
 export function MessageInput({ onSend, onTyping }: MessageInputProps) {
   const [text, setText] = useState("");
-  const [pendingImage, setPendingImage] = useState<ImagePayload | null>(null);
+  const [pendingImages, setPendingImages] = useState<(ImagePayload & { size: number })[]>([]);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
@@ -25,38 +42,64 @@ export function MessageInput({ onSend, onTyping }: MessageInputProps) {
     typingTimeoutRef.current = window.setTimeout(() => onTyping(false), 1500);
   }
 
-  function handleFileSelect(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+  async function handleFileSelect(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
+    if (files.length === 0) return;
 
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      setError("Only PNG, JPG, and WEBP images are supported.");
-      return;
-    }
-    if (file.size > MAX_IMAGE_BYTES) {
-      setError("Image must be smaller than 5MB.");
-      return;
+    let currentCount = pendingImages.length;
+    let currentBytes = pendingImages.reduce((sum, img) => sum + img.size, 0);
+    const accepted: File[] = [];
+    const problems: string[] = [];
+
+    for (const file of files) {
+      if (!ACCEPTED_TYPES.includes(file.type)) {
+        problems.push(`${file.name}: only PNG, JPG, and WEBP are supported`);
+        continue;
+      }
+      if (file.size > MAX_IMAGE_BYTES) {
+        problems.push(`${file.name}: larger than 5MB`);
+        continue;
+      }
+      if (currentCount >= MAX_IMAGES) {
+        problems.push(`Only ${MAX_IMAGES} photos per message`);
+        break;
+      }
+      if (currentBytes + file.size > MAX_TOTAL_BYTES) {
+        problems.push("Total size is over 20MB, send the rest in another message");
+        break;
+      }
+      accepted.push(file);
+      currentCount += 1;
+      currentBytes += file.size;
     }
 
-    setError(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      setPendingImage({
-        dataUrl: reader.result as string,
-        name: file.name,
-        mime: file.type,
-      });
-    };
-    reader.readAsDataURL(file);
+    setError(problems.length > 0 ? problems.join(". ") + "." : null);
+    if (accepted.length === 0) return;
+
+    try {
+      const loaded = await Promise.all(accepted.map(readAsImagePayload));
+      setPendingImages((prev) => [...prev, ...loaded]);
+    } catch {
+      setError("Could not read one of the selected images.");
+    }
+  }
+
+  function removeImage(index: number) {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index));
   }
 
   function handleSend() {
     const trimmed = text.trim();
-    if (!trimmed && !pendingImage) return;
-    onSend(trimmed, pendingImage);
+    if (!trimmed && pendingImages.length === 0) return;
+    const images: ImagePayload[] = pendingImages.map(({ dataUrl, name, mime }) => ({
+      dataUrl,
+      name,
+      mime,
+    }));
+    onSend(trimmed, images.length > 0 ? images : null);
     setText("");
-    setPendingImage(null);
+    setPendingImages([]);
     onTyping(false);
   }
 
@@ -78,23 +121,27 @@ export function MessageInput({ onSend, onTyping }: MessageInputProps) {
         </p>
       )}
 
-      {pendingImage && (
-        <div className="mb-2 inline-flex items-center gap-2 rounded-lg bg-black/5 dark:bg-white/10 p-1.5 pr-2">
-          <img
-            src={pendingImage.dataUrl}
-            alt={pendingImage.name}
-            className="w-12 h-12 object-cover rounded-md"
-          />
-          <span className="text-xs text-text-bright/70 dark:text-text-dark/70 max-w-[140px] truncate">
-            {pendingImage.name}
-          </span>
-          <button
-            onClick={() => setPendingImage(null)}
-            className="w-5 h-5 rounded-full flex items-center justify-center hover:bg-black/10 dark:hover:bg-white/10"
-            aria-label="Remove attachment"
-          >
-            <CloseIcon className="w-3.5 h-3.5" />
-          </button>
+      {pendingImages.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {pendingImages.map((img, index) => (
+            <div
+              key={`${img.name}-${index}`}
+              className="relative w-16 h-16 rounded-lg overflow-hidden bg-black/5 dark:bg-white/10"
+            >
+              <img
+                src={img.dataUrl}
+                alt={img.name}
+                className="w-full h-full object-cover"
+              />
+              <button
+                onClick={() => removeImage(index)}
+                className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full flex items-center justify-center bg-black/60 text-white hover:bg-black/80"
+                aria-label={`Remove ${img.name}`}
+              >
+                <CloseIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
@@ -103,10 +150,11 @@ export function MessageInput({ onSend, onTyping }: MessageInputProps) {
           ref={fileInputRef}
           type="file"
           accept="image/png,image/jpeg,image/webp"
+          multiple
           className="hidden"
           onChange={handleFileSelect}
         />
-        <IconButton onClick={() => fileInputRef.current?.click()} aria-label="Attach image">
+        <IconButton onClick={() => fileInputRef.current?.click()} aria-label="Attach images">
           <PaperclipIcon className="w-5 h-5" />
         </IconButton>
 
