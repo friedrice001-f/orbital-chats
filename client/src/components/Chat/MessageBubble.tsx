@@ -32,6 +32,19 @@ function DownloadIcon({ className }: { className?: string }) {
   );
 }
 
+async function downloadAll(images: { dataUrl: string; name?: string }[]) {
+  for (let i = 0; i < images.length; i++) {
+    const a = document.createElement("a");
+    a.href = images[i].dataUrl;
+    a.download = images[i].name || `image-${i + 1}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // small gap so the browser doesn't drop back-to-back downloads
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+}
+
 export function MessageBubble({
   message,
   isOwn,
@@ -106,6 +119,16 @@ export function MessageBubble({
               </div>
             ))}
           </div>
+        )}
+
+        {isGrid && (
+          <button
+            onClick={() => downloadAll(images)}
+            className="mb-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-glow-violet hover:opacity-80 transition"
+          >
+            <DownloadIcon className="w-3.5 h-3.5" />
+            Download all ({images.length})
+          </button>
         )}
 
         {message.text && (
