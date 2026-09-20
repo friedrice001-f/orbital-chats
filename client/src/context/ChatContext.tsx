@@ -34,7 +34,11 @@ interface ChatContextValue {
   openDm: (peerId: string) => Promise<void>;
   createGroup: (name: string, memberIds: string[]) => Promise<void>;
   selectRoom: (roomId: string) => void;
-  sendMessage: (roomId: string, text: string, image?: ImagePayload | null) => Promise<void>;
+  sendMessage: (
+    roomId: string,
+    text: string,
+    images?: ImagePayload[] | null
+  ) => Promise<void>;
   setTyping: (roomId: string, isTyping: boolean) => void;
   logout: () => void;
 }
@@ -115,31 +119,32 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
- const currentUserIdRef = useRef<string | null>(null);
+  const currentUserIdRef = useRef<string | null>(null);
   currentUserIdRef.current = currentUser?.id || null;
   const onlineUsersRef = useRef<PublicUser[]>([]);
   onlineUsersRef.current = onlineUsers;
   const credentialsRef = useRef<{ phone: string; displayName: string } | null>(null);
+
   useEffect(() => {
     function handleConnect() {
       // Only re-identify if we were already logged in before this — the
       // very first login is handled by login() itself.
-       if (currentUserIdRef.current && credentialsRef.current) {
-      socket.emit("auth:login", credentialsRef.current, (result: LoginResult) => {
-        if (result.ok && result.user) {
-          setCurrentUser(result.user);
-          setRooms(result.rooms || []);
-          setOnlineUsers(result.onlineUsers || []);
-        }
-      });
+      if (currentUserIdRef.current && credentialsRef.current) {
+        socket.emit("auth:login", credentialsRef.current, (result: LoginResult) => {
+          if (result.ok && result.user) {
+            setCurrentUser(result.user);
+            setRooms(result.rooms || []);
+            setOnlineUsers(result.onlineUsers || []);
+          }
+        });
+      }
     }
-  }
-  socket.on("connect", handleConnect);
-  return () => {
-    socket.off("connect", handleConnect);
-  };
-}, []);
-  
+    socket.on("connect", handleConnect);
+    return () => {
+      socket.off("connect", handleConnect);
+    };
+  }, []);
+
   const login = useCallback(async (phone: string, displayName: string) => {
     credentialsRef.current = { phone, displayName };
     setIsConnecting(true);
@@ -222,11 +227,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendMessage = useCallback(
-    async (roomId: string, text: string, image?: ImagePayload | null) => {
+    async (roomId: string, text: string, images?: ImagePayload[] | null) => {
+      const list = images && images.length > 0 ? images : null;
       return new Promise<void>((resolve) => {
         socket.emit(
           "message:send",
-          { roomId, text: text || null, image: image || null },
+          {
+            roomId,
+            text: text || null,
+            images: list,
+            // Kept so an older server/client that only knows `image` still works.
+            image: list ? list[0] : null,
+          },
           (_result: SendMessageResult) => resolve()
         );
       });
