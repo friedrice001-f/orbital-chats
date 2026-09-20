@@ -14,6 +14,24 @@ function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function DownloadIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M12 3v12" />
+      <path d="M7 10l5 5 5-5" />
+      <path d="M5 21h14" />
+    </svg>
+  );
+}
+
 export function MessageBubble({
   message,
   isOwn,
@@ -41,16 +59,28 @@ export function MessageBubble({
         )}
 
         {message.image && (
-          <button
-            onClick={() => onImageClick(message.image!.dataUrl)}
-            className="block mb-1.5 rounded-lg overflow-hidden max-w-[240px]"
-          >
-            <img
-              src={message.image.dataUrl}
-              alt={message.image.name}
-              className="w-full h-auto object-cover hover:opacity-90 transition"
-            />
-          </button>
+          <div className="relative mb-1.5 rounded-lg overflow-hidden max-w-[240px]">
+            <button
+              onClick={() => onImageClick(message.image!.dataUrl)}
+              className="block"
+            >
+              <img
+                src={message.image.dataUrl}
+                alt={message.image.name}
+                className="w-full h-auto object-cover hover:opacity-90 transition"
+              />
+            </button>
+
+            <a
+              href={message.image.dataUrl}
+              download={message.image.name || "image"}
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Download image"
+              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 transition flex items-center justify-center text-white"
+            >
+              <DownloadIcon className="w-4 h-4" />
+            </a>
+          </div>
         )}
 
         {message.text && (
