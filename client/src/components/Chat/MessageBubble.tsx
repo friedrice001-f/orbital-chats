@@ -39,6 +39,15 @@ export function MessageBubble({
   showSenderName,
   onImageClick,
 }: MessageBubbleProps) {
+  // New messages carry `images`; older messages only have a single `image`.
+  const images =
+    message.images && message.images.length > 0
+      ? message.images
+      : message.image
+      ? [message.image]
+      : [];
+  const isGrid = images.length > 1;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -58,28 +67,44 @@ export function MessageBubble({
           <p className="text-xs font-semibold text-glow-violet mb-1">{senderName}</p>
         )}
 
-        {message.image && (
-          <div className="relative mb-1.5 rounded-lg overflow-hidden max-w-[240px]">
-            <button
-              onClick={() => onImageClick(message.image!.dataUrl)}
-              className="block"
-            >
-              <img
-                src={message.image.dataUrl}
-                alt={message.image.name}
-                className="w-full h-auto object-cover hover:opacity-90 transition"
-              />
-            </button>
+        {images.length > 0 && (
+          <div
+            className={clsx(
+              "mb-1.5 gap-1",
+              isGrid ? "grid grid-cols-2 max-w-[280px]" : "max-w-[240px]"
+            )}
+          >
+            {images.map((img, index) => (
+              <div
+                key={`${img.name}-${index}`}
+                className={clsx(
+                  "relative rounded-lg overflow-hidden",
+                  // With 3 photos, let the first one span the full width
+                  isGrid && images.length === 3 && index === 0 && "col-span-2"
+                )}
+              >
+                <button onClick={() => onImageClick(img.dataUrl)} className="block w-full">
+                  <img
+                    src={img.dataUrl}
+                    alt={img.name}
+                    className={clsx(
+                      "w-full object-cover hover:opacity-90 transition",
+                      isGrid ? "aspect-square" : "h-auto"
+                    )}
+                  />
+                </button>
 
-            <a
-              href={message.image.dataUrl}
-              download={message.image.name || "image"}
-              onClick={(e) => e.stopPropagation()}
-              aria-label="Download image"
-              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 transition flex items-center justify-center text-white"
-            >
-              <DownloadIcon className="w-4 h-4" />
-            </a>
+                <a
+                  href={img.dataUrl}
+                  download={img.name || "image"}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Download image"
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 hover:bg-black/70 transition flex items-center justify-center text-white"
+                >
+                  <DownloadIcon className="w-4 h-4" />
+                </a>
+              </div>
+            ))}
           </div>
         )}
 
